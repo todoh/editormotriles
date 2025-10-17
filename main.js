@@ -225,6 +225,22 @@ function initializeAppListeners() {
     checkForRecovery(); // Comprobar si hay algo que recuperar al cargar la app
 }
 
+// --- NUEVO: Vigilantes de errores globales para facilitar la depuración ---
+window.addEventListener('error', function(event) {
+    console.error('ERROR GLOBAL NO CAPTURADO:', {
+        message: event.message,
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+        error: event.error
+    });
+});
+
+window.addEventListener('unhandledrejection', function(event) {
+    console.error('RECHAZO DE PROMESA NO MANEJADO:', event.reason);
+});
+
+
 // Iniciar la aplicación
 initializeAppListeners();
 

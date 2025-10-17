@@ -86,7 +86,7 @@ export async function handleCreateShort(noticia) {
         const metaResponseText = await callGeminiAPI(youtubeMetaPrompt);
         const youtubeMetadata = parseJsonResponse(metaResponseText, 'youtube-metadata');
         
-        // --- NUEVO: Guardar datos de recuperación antes de renderizar ---
+        // --- Guardar datos de recuperación antes de renderizar ---
         try {
             const recoveryData = {
                 script,
@@ -104,7 +104,6 @@ export async function handleCreateShort(noticia) {
     } catch (error) {
         console.error('Error creando el short:', error);
         shortStatus.textContent = `Error: ${error.message}`;
-        // Limpiar datos de recuperación si hay un error
         sessionStorage.removeItem('videoRecoveryData');
     }
 }
@@ -120,14 +119,13 @@ async function createVideoFromScript(scriptData, youtubeMetadata, categoria) {
     let mediaRecorder;
 
     try {
-        // 1. Descargar todos los recursos en paralelo
+        // ... (El resto de esta función no necesita cambios)
         shortStatus.textContent = 'Descargando recursos (1 audio, 7 imágenes)...';
         const [downloadedImages, audioBlob] = await Promise.all([
              Promise.all(image_queries.map(q => getImageUrl(q).then(url => loadImage(url)))),
              getTtsAudioBlob(narration)
         ]);
 
-        // 2. Configurar MediaRecorder y AudioContext
         shortStatus.textContent = 'Preparando grabación y audio...';
         const videoStream = canvas.captureStream(30);
         const audioContext = new AudioContext();
@@ -139,7 +137,6 @@ async function createVideoFromScript(scriptData, youtubeMetadata, categoria) {
         mediaRecorder.ondataavailable = e => chunks.push(e.data);
 
         mediaRecorder.onstop = () => {
-            // --- NUEVO: Limpiar datos de recuperación al finalizar correctamente ---
             sessionStorage.removeItem('videoRecoveryData');
             
             const videoBlob = new Blob(chunks, { type: 'video/mp4' });
@@ -165,20 +162,17 @@ async function createVideoFromScript(scriptData, youtubeMetadata, categoria) {
             audioContext.close();
         };
 
-        // 3. Decodificar audio y calcular duraciones
         const audioBuffer = await audioContext.decodeAudioData(await audioBlob.arrayBuffer());
         const totalAudioDuration = audioBuffer.duration;
         const imageDuration = totalAudioDuration / downloadedImages.length;
         const subtitleDuration = totalAudioDuration / subtitles.length;
 
-        // 4. Conectar y reproducir audio
         const audioSource = audioContext.createBufferSource();
         audioSource.buffer = audioBuffer;
         audioSource.connect(audioDestination);
         audioSource.start(0);
         mediaRecorder.start();
 
-        // 5. Iniciar el bucle de renderizado
         let startTime = null;
         function renderLoop(timestamp) {
             if (!startTime) startTime = timestamp;
@@ -219,7 +213,6 @@ function uploadToYouTube(videoBlob, metadata, categoria) {
     uploadButton.textContent = 'Iniciando sesión...';
     shortStatus.textContent = 'Por favor, autoriza la subida en la ventana emergente de Google.';
 
-    // Define el callback para cuando el token de acceso sea obtenido
     googleTokenClient.callback = (tokenResponse) => {
         if (tokenResponse.error) {
             console.error('Error de autenticación:', tokenResponse.error);
@@ -230,7 +223,6 @@ function uploadToYouTube(videoBlob, metadata, categoria) {
             return;
         }
 
-        // Token obtenido, ahora podemos usar la API de YouTube
         uploadButton.textContent = 'Subiendo vídeo...';
         shortStatus.textContent = 'Enviando vídeo a YouTube. Esto puede tardar varios minutos...';
         
@@ -239,25 +231,30 @@ function uploadToYouTube(videoBlob, metadata, categoria) {
                 title: metadata.titulo,
                 description: metadata.descripcion,
                 tags: [categoria.toLowerCase().replace(/\s+/g, ''), 'noticias', 'short'],
-                categoryId: '25' // 25 es el ID para "Noticias y Política"
+                categoryId: '25'
             },
-            status: {
-                privacyStatus: 'private' // Sube como 'privado'. Cambia a 'public' o 'unlisted' si lo deseas.
-            }
+            status: { privacyStatus: 'private' }
         };
 
         const uploader = new MediaUploader({
-            baseUrl: 'https://www.googleapis.com/upload/youtube/v3/videos',
+            // ***** CORRECCIÓN CLAVE AQUÍ *****
+            baseUrl: 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable',
             file: videoBlob,
             token: tokenResponse.access_token,
             metadata: resource,
-            params: {
-                part: Object.keys(resource).join(',')
-            },
-            onError: (error) => {
-                console.error('Error durante la subida:', error);
-                const errorBody = JSON.parse(error);
-                alert(`Error al subir a YouTube: ${errorBody.error.message}`);
+            params: { part: Object.keys(resource).join(',') },
+            onError: (errorResponse) => {
+                console.error('Error durante la subida:', errorResponse);
+                let errorMessage = 'Ocurrió un error desconocido durante la subida.';
+                try {
+                    const errorBody = JSON.parse(errorResponse);
+                    if (errorBody.error?.message) {
+                        errorMessage = errorBody.error.message;
+                    }
+                } catch (e) {
+                    errorMessage = errorResponse || 'Error de red o CORS. Revisa la consola del navegador.';
+                }
+                alert(`Error al subir a YouTube: ${errorMessage}`);
                 uploadButton.disabled = false;
                 uploadButton.textContent = 'Reintentar Subida a YouTube';
                 shortStatus.textContent = 'Error durante la subida.';
@@ -272,7 +269,6 @@ function uploadToYouTube(videoBlob, metadata, categoria) {
                 uploadButton.textContent = '¡Subido con Éxito!';
                 uploadButton.classList.replace('bg-red-600', 'bg-gray-400');
                 uploadButton.classList.replace('hover:bg-red-700', 'cursor-not-allowed');
-
                 shortStatus.textContent = '¡Vídeo subido a YouTube!';
                 shortResult.innerHTML += `
                     <p class="text-green-600 font-semibold mt-2 text-center">
@@ -284,13 +280,11 @@ function uploadToYouTube(videoBlob, metadata, categoria) {
         uploader.upload();
     };
 
-    // Solicita el token de acceso. Esto mostrará la ventana emergente de Google.
     googleTokenClient.requestAccessToken({ prompt: 'consent' });
 }
 
 
 // --- Lógica de la clase MediaUploader para subidas resumibles a Google API ---
-// Esta clase es necesaria para gestionar la subida de archivos grandes.
 class MediaUploader {
   constructor(options) {
     this.file = options.file;
@@ -308,8 +302,11 @@ class MediaUploader {
   }
 
   upload() {
+    const url = new URL(this.baseUrl);
+    Object.keys(this.params).forEach(key => url.searchParams.append(key, this.params[key]));
+
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', this.baseUrl, true);
+    xhr.open('POST', url.toString(), true);
     xhr.setRequestHeader('Authorization', 'Bearer ' + this.token);
     xhr.setRequestHeader('Content-Type', 'application/json; charset=UTF-8');
     xhr.setRequestHeader('X-Upload-Content-Length', this.file.size);
@@ -396,14 +393,10 @@ class RetryHandler {
 // === FUNCIONES DE AYUDA (Helpers)
 // =================================================================
 
-// --- Funciones de Dibujo en Canvas ---
 function drawScene(ctx, width, height, image, text) {
     ctx.fillStyle = 'black';
     ctx.fillRect(0, 0, width, height);
-
-    if(!image) return; // Si la imagen aún no ha cargado, no la dibujes
-
-    // Lógica para hacer zoom y centrar la imagen
+    if(!image) return;
     const zoom = 1.2;
     const imgRatio = image.width / image.height;
     const canvasRatio = width / height;
@@ -414,12 +407,8 @@ function drawScene(ctx, width, height, image, text) {
         sw = image.width; sh = sw / canvasRatio; sx = 0; sy = (image.height - sh) / 2;
     }
     ctx.drawImage(image, sx, sy, sw, sh, -width * (zoom - 1) / 2, -height * (zoom - 1) / 2, width * zoom, height * zoom);
-    
-    // Fondo para subtítulos
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.fillRect(0, height * 0.65, width, height * 0.35);
-
-    // Texto de subtítulos
     ctx.fillStyle = 'white';
     ctx.font = 'bold 32px Inter, sans-serif';
     ctx.textAlign = 'center';
@@ -431,7 +420,6 @@ function wrapText(context, text, x, y, maxWidth, lineHeight) {
     const words = text.split(' ');
     let line = '';
     const lines = [];
-
     for (const word of words) {
         const testLine = line + word + ' ';
         const testWidth = context.measureText(testLine).width;
@@ -443,15 +431,12 @@ function wrapText(context, text, x, y, maxWidth, lineHeight) {
         }
     }
     lines.push(line.trim());
-
     const startY = y - (lineHeight * (lines.length - 1)) / 2;
     for (let i = 0; i < lines.length; i++) {
         context.fillText(lines[i], x, startY + (i * lineHeight));
     }
 }
 
-
-// --- Funciones de Obtención de Recursos ---
 async function getImageUrl(query) {
     let imageUrl = `https://placehold.co/480x854/2d3748/ffffff?text=${encodeURIComponent(query)}`;
     try {
@@ -482,7 +467,7 @@ function loadImage(url) {
 }
 
 async function getTtsAudioBlob(text) {
-    const ELEVENLABS_VOICE_ID = "pNInz6obpgDQGcFmaJgB"; // Voz de "Adam"
+    const ELEVENLABS_VOICE_ID = "pNInz6obpgDQGcFmaJgB";
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`, {
         method: 'POST',
         headers: {
