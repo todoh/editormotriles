@@ -195,8 +195,10 @@
         function createNewsCard(noticia) {
             const card = document.createElement('div');
             card.className = "bg-white rounded-lg shadow-lg overflow-hidden flex flex-col";
+            // MODIFIED: Use the CORS proxy for displaying images on the cards
+            const proxiedImageUrl = `https://corsproxy.io/?${encodeURIComponent(noticia.imagen)}`;
             card.innerHTML = `
-                <img class="h-48 w-full object-cover" src="${noticia.imagen}" alt="${noticia.titulo}" crossorigin="anonymous">
+                <img class="h-48 w-full object-cover" src="${proxiedImageUrl}" alt="${noticia.titulo}">
                 <div class="p-6 flex flex-col flex-grow">
                     <div class="flex-grow">
                         <span class="text-xs font-semibold ${noticia.estado === 'publicado' ? 'text-green-600 bg-green-100' : 'text-yellow-600 bg-yellow-100'} py-1 px-2 rounded-full">${noticia.estado}</span>
